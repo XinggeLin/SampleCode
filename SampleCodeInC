@@ -1,0 +1,360 @@
+//
+//CSC360 Assignment #1
+//Lin, Xingge
+//
+
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <string.h>
+#include <errno.h>
+#include <limits.h>
+
+
+//Define a type for process
+typedef struct process{
+
+	char* name;  //process name
+	pid_t pid;  //process id
+   	struct process* next;   //next
+
+}job;
+	job* head = NULL;
+
+
+//Kill all process and relase their memory
+int killAll() {
+    
+    //declear a temp pointer
+    job* pointer;
+    //point current to where head pointed to
+    job* current = head;
+    //head point to null
+    head = NULL;
+    
+    //kill current process from the head of the list untill there is no process exist
+    while(current != NULL) {
+        
+        //store the address of current program
+        pointer = current;
+        //move current pointer to current.next
+        current = (*current).next;
+        //kill the current one
+        kill(((*pointer).pid), SIGKILL);
+	free(pointer);
+        
+    }
+    return 0;
+}
+
+
+// Returns the string needed to be printed as header
+char* getPathString() {
+    
+    //get current working directory
+    char* Arrow = " > ";
+    char* RSI = "RSI: ";
+    char* cwd = getcwd(0,0);
+    char* pathString = (char*)malloc(strlen(Arrow) + strlen(RSI) + strlen(cwd) + 1);
+    //put all these parts together
+    strcpy(pathString, RSI);
+    strcat(pathString, cwd);
+    strcat(pathString, Arrow);
+    //return the final string
+    return pathString;
+    
+}
+
+//Function to change directory, called when process command 'cd'
+void changeDirectory(char* destination[]) {
+    
+    //if argument == '~' or '' then go to HOME directory
+    if(!strcmp(destination[1], "~"))
+    {
+        if(chdir(getenv("HOME")) != 0)
+            perror("Faild to Get HOME: ");
+        
+    }
+    //else change direction to destination argument
+    else if(chdir(destination[1]) != 0)
+        perror("Invalid command: ");
+    
+}
+
+
+//Add a new process to the job linked list
+void addNew(char* newJobName, pid_t newJobPid) {
+
+    job* new = (job*)malloc(sizeof(job));
+    if (new == NULL) {
+        exit(EXIT_FAILURE);
+    }
+    //set value, name and pid
+    (*new).pid = newJobPid;
+    (*new).name = newJobName;
+    (*new).next = head;
+    //head point to what ever new pointed to
+    head = new;
+
+}
+
+
+//Restore command and arguments
+int processCommand(char* UserInput, char** Command_Args)
+{
+    int i = 0;
+    char* temp;
+    //tok userinput with space
+    temp = strtok(UserInput, " ");
+    
+    //Save the commands in Command_Args
+    while(temp != NULL){
+	//printf("%s",temp);
+        Command_Args[i++] = temp;
+        temp = strtok(NULL, " ");;
+    }
+    //End with Null character
+    Command_Args[i] = '\0';
+    
+    return i;
+}
+
+
+//Kill a pid
+void killPid(pid_t pid){
+    //Start from the head
+    job* current = head;
+    job* previous;
+    //Loop through and find the pid
+    while(current != NULL){
+        
+        if((*current).pid == pid) {
+            //Kill the process and relink their neigbours
+            //if the process needs to be killed is the first
+	    if(current != head){
+		  //previous points to current, current move to next
+                (*previous).next = (*current).next;
+                free(current);
+                return;
+	    } else {
+                head = (*current).next;
+                //free the memory of the killed process
+                free(current);
+                return;
+            }
+        } else {
+            previous = current;
+            current = (*current).next;
+        }
+    }
+}
+
+
+//execute commands
+//Based on the tutorial code ForkDemo2.c
+void execute(char* args[]) {
+
+	pid_t childpid;
+	childpid = fork();
+
+    	if (childpid >= 0) /* fork succeeded */
+    	{
+        	if (childpid == 0) /* fork() returns 0 to the child process */
+        	{
+			if(execvp(args[0],args) < 0) {
+				//reached if failed
+				printf("RSI: %s: command not found\n", args[0]);
+			}
+			exit(EXIT_SUCCESS);
+        	}
+        	else /* fork() returns new pid to the parent process */
+        	{
+        		wait(NULL);
+        	}
+    	}
+    	else /* fork returns -1 on failure */
+    	{
+        	perror("fork"); /* display error message */
+        	exit(EXIT_FAILURE); 
+    	}
+
+}
+
+
+// Executes commands in the background
+void executeInBackground(char* args[]) {
+	int status;
+	pid_t childProcess = fork();
+
+	//if fork sucessed
+	if(childProcess>=0){
+		if(childProcess==0){
+			//if pid = 0 inside child process
+		  	//call execvp()
+			if(execvp(args[0],args) < 0) {
+				//Reachable if execvp failed-out put error message
+				perror("Invalid command: ");
+			}
+			exit(EXIT_SUCCESS);
+		}else{
+			//if pid > 0
+			
+			addNew(args[0], childProcess);
+			//printf("Head Name after add new: %s\n",(*head).name);
+			int retVal = waitpid(childProcess, &status, WNOHANG);
+			if (retVal == -1) {
+				perror("Waitpid");
+				exit(EXIT_FAILURE);
+			}
+		}
+	}else{
+		//fork faild
+		perror("Fork failed: ");
+		exit(EXIT_FAILURE);
+	}
+}
+
+
+//Process the command and arguments read from stdin
+int processUserInput(char str[])
+{
+	//Store number of characters that are legal
+	int charNum = 0;
+	//Loop through the input string and get all legal characters
+	while(charNum < strlen(str))
+	{
+        char temp[MAX_INPUT];
+        //reset counter in each cycle
+        charNum = 0;
+		//make a copy of str[]
+        strcpy(temp, str);
+		
+		//Loop through the str[] replace '~'
+		int i;
+		for(i = 0; i < strlen(str); i++)
+		{
+			if(str[ i ] != '~')
+			{	
+				charNum++;
+				//if the content of the index is not '~' just increment counter
+			}	
+			else{
+				//if there is a '~' in argument replace with HOME directory
+                                strncpy(temp, str, i);
+                                temp[i++] = '\0';
+                                strcat(temp, getenv("HOME"));
+                                strcat(temp, str+i);
+			}
+		}
+		//Store temp back to str
+		strcpy(str, temp);
+	}
+		
+	int i;
+	for(i = 0; str[i] != '\0'; i++);
+	i--;
+	
+	if(i > PATH_MAX)
+		printf("Error: Path too long\n");
+	
+	return 0;
+}
+
+
+//*****************************************************
+//Demo code from resources
+/* SIGCHLD handler. */
+static void sigchld_hdl (int sig) {
+
+	int status;	
+	pid_t s_pid;
+
+	while (1)
+	{
+		s_pid = waitpid(-1, &status, WNOHANG);
+		if (s_pid < 0) 
+		{ 
+			//perror ("waitpid");
+			break;
+		}
+		if (s_pid == 0) {
+			break;
+		}
+		printf("pid: %d has finished.\n",s_pid);
+		killPid(s_pid);
+	}
+}
+//*****************************************************
+
+int main() {
+
+//*****************************************************
+//Demo code from resources
+    struct sigaction act;
+
+
+    memset (&act, '\0', sizeof(act));
+    act.sa_handler = sigchld_hdl;
+
+    if (sigaction(SIGCHLD, &act, 0)) {
+		perror ("sigaction");
+		return 1;
+    }
+
+//*****************************************************
+
+	//Print host information and home directory
+	char* cwd = getcwd(0,0);
+	printf("linux.csc.uvic.ca:%s$ ./rsi \n", cwd);
+	int bailout = 0;
+    //while user not quit
+	while (!bailout) {
+
+		printf("%s",getPathString());
+		char get[2048];
+		fgets(get,2048,stdin);
+		//Replace ending null character with space
+		get[strlen(get)-1] = ' ';
+		processUserInput(get);
+		char* argArray[PATH_MAX];
+		int numArgs = processCommand(get, argArray);;
+		//If user type command 'quit'
+		if (!strcmp(get, "quit")) {
+            //quit flag up
+			bailout = 1;
+			continue;	
+		}
+        
+        //If no command given just continue (e.g. return)
+        if (numArgs == 0)
+            continue;
+        
+        //Handle command 'cd'
+        else if (!strcmp(argArray[0], "cd")) {
+            //If no argument given handle like 'cd ~'
+            if(numArgs == 1)
+                argArray[1] = "~";
+            //Call changeDirectory
+            changeDirectory(argArray);
+            continue;
+        }
+
+		//If '&' signal detected
+		else if (!strcmp(argArray[numArgs-1], "&") && numArgs>1) {
+			argArray[numArgs-1]='\0';
+			argArray[numArgs]=NULL;			
+            		//call execute in backbround
+			executeInBackground(argArray);
+			continue;
+		} else {
+			execute(argArray);
+			continue;
+		}
+		free(get);
+	}
+	killAll();
+	printf("RSI:  Exiting normally.\n");
+	return 0;
+}
