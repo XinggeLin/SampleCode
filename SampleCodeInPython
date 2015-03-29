@@ -1,0 +1,129 @@
+#! /usr/bin/python
+import fileinput
+##Global Variables:
+DoubleSpaceSignal = False         ##global variable detect signal of double space on/off Boolean to false(ADDITIONAL FUNCTION)
+FmtOn_Off_Signal = False,         ##initialize the detect signal of format on/off Boolean to false
+width = 0,                        ##global variable which stores the width of the format command
+#Margin = 0,                       ##global variable which stores the margin of the format command
+Size = 0
+last_was_new = False
+f= {'mrgn': 0}
+###################
+
+def processfile (line):
+    global DoubleSpaceSignal, FmtOn_Off_Signal, width, Margin,Size,last_was_new,f
+    ##These part of code is for reading the commands include in the txt file and store them in the global variables.
+    split = line.split()
+    if len(split) is not 0:
+        ##Check for the '?width' command in the file
+        if split[0] == "?width":
+            if isinstance(int(split[1]), int):
+                width = int(split[1])
+                FmtOn_Off_Signal = True
+            elif split[1][0] == '-':
+                width -= int(split[1][1:])
+                FmtOn_Off_Signal = True
+            elif split[1][0] == '+':
+                width += int(split[1][1:])
+                FmtOn_Off_Signal = True
+            return None
+        ##Check for the '?mrgn' command in the file
+        elif split[0] == "?mrgn":
+            if split[1][:1] == "-":
+                f['mrgn'] -= int(split[1][1:])
+                if f['mrgn'] < 0:
+                    f['mrgn'] = 0
+            elif split[1][:1] == "+":
+                f['mrgn'] += int(split[1][1:])
+            else:
+                f['mrgn'] = int(split[1])
+         ##Set the restriction of the margin'If a margin would be greater
+         ##than then pagewidth minus 20, then the margin is set to pagewidth minus 20.'
+            if f['mrgn'] > width - 20:
+                f['mrgn'] = width - 20
+            return None
+                ##Check for the '?fmt' comand in the file
+        elif split[0] == "?fmt":
+            if split[1] == "off":
+                FmtOn_Off_Signal = False
+            elif split[1] == "on":
+                FmtOn_Off_Signal = True
+            return None
+        ##Additional function to set doubleLine
+        elif split[0] == "?doubleLine":
+            if split[1] == "off":
+                DoubleSpaceSignal = False
+            elif split[1] == "on":
+                DoubleSpaceSignal = True
+            return None
+
+    ##These part of the code is to process the file with the commands and numbers
+    if FmtOn_Off_Signal:
+
+        # Special case for empty lines.
+        if split == []:
+            Size = 0
+            if last_was_new:
+                return '\n'
+            else:
+                last_was_new = True
+                return '\n\n'
+        last_was_new = False
+        
+        # Do we need a margin? (Is this a new line?)
+        if Size == 0:
+            out = "".join( " " for i in range(f['mrgn'])  )
+            Size = f['mrgn']
+        else:
+            out = ""
+        
+        # Gradually add each word, making sure we're not going over the width
+        for word in split:
+            # Do we need a new line?
+            if Size + len(word) >= width:
+                margin = "".join( " " for i in range(f['mrgn'])  )
+                
+                ##Extra work - the command of double space format control
+                if DoubleSpaceSignal:
+                    out = out + '\n'
+                out = out + '\n' + margin
+                
+                Size = f['mrgn']
+            # Otherwise, add a space
+            elif Size != f['mrgn']:
+                Size += 1
+                out = out + ' '
+            # Concatenate
+            out = out + word
+            Size += len(word)
+
+        return out
+
+    else:
+        return line
+    
+
+def main ():
+    
+
+    """
+        Format according to given control sequences.
+        """
+    # Define our variables.
+    # The currently calculated output.
+    output = ""
+    
+    # Process each line. If we detect a control sequence on the line, return none. If we detect [], add an extra newline. Otherwise just check for paragraph size and margin. The output will be joined with 'output'
+    lines =  [ line for line in fileinput.input() ]
+    processed = [ processfile(line) for line in lines]
+    no_empty = [ line for line in processed if line != None ]
+
+    if len(no_empty) == 0:
+        return
+    else:
+        output = "".join(no_empty)
+        print output,
+
+# Detect if we're running via ./ or if we're called.
+if __name__ == "__main__":
+    main()
